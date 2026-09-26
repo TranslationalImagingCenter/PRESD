@@ -1,0 +1,9 @@
+# Requirements for the PRESD pipeline
+# Tested with Python 3.11 (spectra conda environment)
+
+numpy==1.26.4
+torch==2.6.0
+tifffile==2025.1.10
+matplotlib==3.10.0
+scipy==1.8.0
+tqdm>=4.66.0

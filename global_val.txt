@@ -1,0 +1,150 @@
+# =============================================================================
+# GLOBAL CONFIGURATION FILE FOR SPECTRAL SUPER-RESOLUTION PROJECT
+# =============================================================================
+# This file contains all configurable parameters for the neural network training,
+# model architecture, data processing, and experimental settings.
+# Modify these values to control all aspects of your experiments.
+
+# -----------------------------------------------------------------------------
+# RANDOM SEEDS & REPRODUCIBILITY
+# -----------------------------------------------------------------------------
+SEED                  31          # Random seed for reproducibility
+DEFAULT_HELPER_SEED   31          # Default seed for helper functions
+
+# -----------------------------------------------------------------------------
+# DATASET CONFIGURATION
+# -----------------------------------------------------------------------------
+TEST_TYPE            NN          # Type of test/model architecture
+channel_num          4          # Number of input channels (must divide 32)
+training_ratio       0.8         # Train/validation split ratio
+MAX_SAMPLES          1000000        # Maximum samples to load per experiment
+NORM                 log         # Normalization type: log, linear, etc.
+NUM_OUTPUT_SLICES    10          # Number of slices for output averaging
+
+# Dataset paths (example folder names — replace with your own)
+TRAIN_FOLDERS        samp5 samp10 samp15 samp20 samp38 samp40    # All human datasets. 
+TEST_FOLDERS          samp1 samp12 samp34 samp37 samp39 pos2 pos12 pos33 pos37 pos39  # samp for human and pos for feline
+
+# Cache and output directories
+CACHE_DIR            ../saved_inputs_human                   # Cache directory for processed data
+PLOTS_DIR            ../results               # Output directory for plots and results
+
+# -----------------------------------------------------------------------------
+# MODEL ARCHITECTURE PARAMETERS
+# -----------------------------------------------------------------------------
+# Core architecture
+BASE_CHANNELS        221         # Base number of channels in encoder
+NUM_BLOCKS           5           # Number of residual blocks
+NUM_HEADS            4           # Number of attention heads (FilmEarly)
+FINAL_ATTN_HEADS     4           # Number of heads for final attention
+EMBED_DIM            64          # Embedding dimension for attention
+
+# Convolution parameters
+KERNEL_SIZE          3           # Standard convolution kernel size
+FINAL_KERNEL_SIZE    1           # Final layer kernel size
+PADDING              1           # Standard padding for conv layers
+LEAKY_RELU_ALPHA     0.01        # LeakyReLU negative slope
+
+# Output channels
+OUTPUT_CHANNELS      32          # Target output spectral channels
+DECODER_CHANNELS     86          # Decoder intermediate channels
+
+# -----------------------------------------------------------------------------
+# TRAINING HYPERPARAMETERS
+# -----------------------------------------------------------------------------
+# Basic training settings
+EPOCHS               10          # Number of training epochs
+BATCHSIZE            126        # Training batch size
+EVAL_BATCH_SIZE      10000      # Batch size for evaluation
+INFERENCE_BATCH_SIZE 8192       # Batch size for inference
+
+# Optimizer settings
+INITIAL_LR           0.000755018996914944  # Initial learning rate
+WEIGHT_DECAY         0.00007969960464206883  # Weight decay for AdamW optimizer
+
+# Learning rate scheduler
+LR_FACTOR            0.8         # Factor to reduce LR
+LR_PATIENCE          3           # Patience for LR scheduler
+MIN_LR               0.00001     # Minimum learning rate
+
+# Early stopping and regularization
+EARLY_STOP_PATIENCE  10           # Patience for early stopping
+GRAD_CLIP_MAX_NORM   2.923677365097244  # Maximum gradient norm for clipping
+WARMUP_EPOCHS        1           # Number of warmup epochs
+
+# Sample sizes for metrics
+PHASOR_SAMPLE_SIZE   1000        # Sample size for phasor loss calculation
+
+# -----------------------------------------------------------------------------
+# LOSS FUNCTION PARAMETERS
+# -----------------------------------------------------------------------------
+LAMBDA_CONSISTENCY   0.1         # Weight for consistency loss term
+LAMBDA_PHASOR        2.861439310748795  # Weight for phasor loss
+LAMBDA_PHASOR_VALUES 2.861439310748795  # Lambda phasor values to test
+DEFAULT_HARMONIC     2           # Default harmonic for phasor loss
+PHASOR_HARMONICS     1 2         # Available phasor harmonics
+PHASOR_EPSILON       0.000000000001  # Epsilon for phasor calculations (1e-12)
+
+# MAPE calculation
+MAPE_EPSILON         0.0000000001    # Epsilon for MAPE calculation (1e-10)
+
+# -----------------------------------------------------------------------------
+# DATA PROCESSING PARAMETERS
+# -----------------------------------------------------------------------------
+# Group size calculation
+GROUP_SIZE_DIVISOR   32          # Divisor for group size calculation (32 // channel_num)
+
+# File processing
+FILE_EXTENSION       .lsm        # Expected file extension
+BLOCK_NUMBER_DEFAULT 1           # Default block number if parsing fails
+
+# Normalization values for nan handling
+NAN_REPLACEMENT      0.0         # Replacement value for NaN
+POSINF_REPLACEMENT   1.0         # Replacement value for +inf
+NEGINF_REPLACEMENT   0.0         # Replacement value for -inf
+STD_THRESHOLD        0.0000000001    # Threshold for std check (1e-10)
+
+# -----------------------------------------------------------------------------
+# WAVELENGTH CONFIGURATION
+# -----------------------------------------------------------------------------
+# Wavelength mapping for different blocks
+WAVELENGTH_BLOCK_1   405         # Wavelength for block 1
+WAVELENGTH_BLOCK_2   458         # Wavelength for block 2
+WAVELENGTH_BLOCK_3   488         # Wavelength for block 3
+WAVELENGTH_BLOCK_4   514         # Wavelength for block 4
+WAVELENGTH_BLOCK_5   561         # Wavelength for block 5
+WAVELENGTH_BLOCK_6   591         # Wavelength for block 6
+WAVELENGTH_BLOCK_7   633         # Wavelength for block 7
+
+# 32-channel emission wavelengths (comma-separated)
+CHAN_WAVELENGTHS     415,424,433,442,450,459,468,477,486,495,504,513,522,530,539,548,557,566,575,584,593,602,610,619,628,637,646,655,664,673,682,690
+
+# -----------------------------------------------------------------------------
+# HARDWARE CONFIGURATION
+# -----------------------------------------------------------------------------
+DEFAULT_GPUS         0        # Default GPU devices to use
+
+# -----------------------------------------------------------------------------
+# VISUALIZATION PARAMETERS
+# -----------------------------------------------------------------------------
+# Figure settings
+FIGURE_SIZE_LARGE    15 10       # Large figure size (width, height)
+FIGURE_SIZE_MEDIUM   12 5        # Medium figure size
+FIGURE_SIZE_SMALL    10 8        # Small figure size
+FIGURE_SIZE_HELPER   12 6        # Helper function figure size
+
+# Plot styling
+DPI                  200         # Figure DPI for saving
+GRID_ALPHA           0.3         # Grid transparency
+ROTATION_ANGLE       15          # Rotation angle for x-axis labels
+
+# Percentile range for visualization
+PERCENTILE_LOW       1           # Lower percentile for normalization
+PERCENTILE_HIGH      99          # Upper percentile for normalization
+
+# -----------------------------------------------------------------------------
+# EXPERIMENTAL CONFIGURATION
+# -----------------------------------------------------------------------------
+
+# JSON formatting
+JSON_INDENT             2        # Indentation for JSON files
