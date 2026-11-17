@@ -1,6 +1,6 @@
 # PRESD: Pixel-wise Resolution Expansion of Spectra via Deep Learning
 
-A deep learning pipeline for **pixel-wise resolution expansion of spectra** in fluorescence microscopy images. Given a reduced (4, 8, or 16 spectral channels) acquisition, the model reconstructs the full **32-channel** emission spectrum per pixel.
+PRESD is a deep neural network that reconstructs a full **32-channel autofluorescence emission spectrum** from as few as four measured channels, pixel by pixel, without using morphology or neighbouring pixels. It brings hyperspectral autofluorescence information to widely available multichannel microscopes that cannot measure it directly.
 
 ---
 
@@ -289,6 +289,17 @@ All parameters are set in `global_val.txt`. Key settings:
 **Loss** = MSE + λ_consistency · consistency (output channel groups vs. input channels) + λ_phasor · phasor (G, S) distance.
 
 Input tensor shape: `(batch, 1, C_in, R)`; output shape: `(batch, 32)`.
+
+---
+
+## Citation
+
+This code accompanies a manuscript currently under review:
+
+**Kousha Changizi Ashtiani, Daniel Eun Sang Koo, Scott E. Fraser, Pierre Baldi, Francesco Cutrale**
+*University of California, Irvine and University of Southern California*
+
+Citation details will be added upon publication.
 
 ---
 
