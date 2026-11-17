@@ -11,7 +11,7 @@ Fluorescence spectral microscopy typically requires many spectral channels to re
 **Key features:**
 - `prepare_data.py` builds the reduced input (4, 8 or 16 channels, any choice of repeats) and the 32-channel ground truth from the raw `.lsm` data
 - Supports multiple acquisition repeats as input to improve reconstruction quality
-- Excitation wavelength passed explicitly via `--wavelength` to condition the network
+- Excitation wavelength read from `Block N` in the filename (or set with `--wavelength`) to condition the network
 - Outputs full 32-channel prediction as `.lsm`, per-pixel metric maps, and spectral plots
 - Metrics (MAPE, SMAPE, RMSE, phasor distance) computed automatically when a ground-truth file is provided
 
@@ -43,7 +43,7 @@ Model files are named `NN_<C_in>ch_<R>repeats.pt` — pick the one that matches 
 
 ## Requirements
 
-**Python 3.11.12** (tested with the `spectra` conda environment)
+**Python 3.11.12**, in any environment (for example conda or `venv`)
 
 ```bash
 pip install -r requirements.txt
@@ -93,12 +93,12 @@ project-root/
 │       ├── train/             #    training curves and metrics
 │       └── test/              #    one folder per tested input file
 ├── dataset/                   # ← contents of Data.zip (raw 32-channel .lsm files)
-│   ├── human/samp5/  …        #    one folder per sample
-│   └── …
+│   ├── pos4_Image12Block_3.lsm
+│   └── samp33_Image23Block_2.lsm
 └── prepared/                  # ← created by prepare_data.py (input / gt pairs)
 ```
 
-Sample folder names above (`human/samp5`, …) are examples; use the names in the extracted dataset. Run all commands from **inside the repository directory**, so that `../dataset`, `../prepared`, `users_models/` and `results/` resolve.
+`Data.zip` puts the raw files directly in `dataset/`, so pass `--raw_folders ../dataset`. The prepared files then go to a sample folder named `dataset` (e.g. `../prepared/train_4ch_5rep/dataset`), which is the folder you pass to `train.py`. If you organise your own data into one folder per sample (e.g. `dataset/human/samp5/`, as in the examples below), each folder becomes its own sample. Run all commands from **inside the repository directory**, so that `../dataset`, `../prepared`, `users_models/` and `results/` resolve.
 
 ---
 
@@ -250,7 +250,6 @@ All parameters are set in `global_val.txt`. Key settings:
 
 | Parameter | Description |
 |---|---|
-| `channel_num` | Default number of input channels |
 | `EPOCHS` | Number of training epochs |
 | `MAX_SAMPLES` | Total pixels sampled for training, split evenly across files |
 | `BATCHSIZE` | Training batch size |
