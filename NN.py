@@ -1,258 +1,224 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
 
-# -----------------------------------------------------------------------------
-#  Configuration ----------------------------------------------------------------
-# -----------------------------------------------------------------------------
 from config import load_global_params
 
-# Load configuration
 global_params = load_global_params()
-channel_num = global_params["channel_num"]
 
-# 32-channel emission wavelengths for wavelength-aware attention
+# Emission centre wavelength (nm) of each output channel, used as attention input.
 CHAN_NM = torch.tensor(global_params["CHAN_WAVELENGTHS_ARRAY"], dtype=torch.float32)
 
+
 # -----------------------------------------------------------------------------
-#  Phasor loss functions -------------------------------------------------------
+# Phasor loss
 # -----------------------------------------------------------------------------
 def phasor_components(spectrum, harmonic=None):
-    """Calculate G and S phasor components at a given harmonic."""
+    """Spectral phasor coordinates (G, S) of each spectrum along the last dimension."""
     if harmonic is None:
         harmonic = global_params["DEFAULT_HARMONIC"]
-    
+
     N = spectrum.shape[-1]
-    device = spectrum.device
-    idx = torch.arange(N, device=device).float()
-
+    idx = torch.arange(N, device=spectrum.device).float()
     angles = 2 * np.pi * harmonic * idx / N
-    sum_intensity = spectrum.sum(dim=-1, keepdim=True) + global_params["PHASOR_EPSILON"]
+    sum_intensity = spectrum.sum(dim=-1) + global_params["PHASOR_EPSILON"]
 
-    G = (spectrum * torch.cos(angles)).sum(dim=-1) / sum_intensity.squeeze(-1)
-    S = (spectrum * torch.sin(angles)).sum(dim=-1) / sum_intensity.squeeze(-1)
-
+    G = (spectrum * torch.cos(angles)).sum(dim=-1) / sum_intensity
+    S = (spectrum * torch.sin(angles)).sum(dim=-1) / sum_intensity
     return G, S
 
+
 def phasor_loss(pred_spectrum, true_spectrum, harmonic=None):
-    """Compute Euclidean distance in the phasor domain between predicted and ground truth spectra."""
+    """Mean Euclidean distance between predicted and true spectra in the phasor plane."""
     if harmonic is None:
         harmonic = global_params["DEFAULT_HARMONIC"]
-        
     G_pred, S_pred = phasor_components(pred_spectrum, harmonic)
     G_true, S_true = phasor_components(true_spectrum, harmonic)
-    return torch.sqrt((G_pred - G_true)**2 + (S_pred - S_true)**2).mean()
+    return torch.sqrt((G_pred - G_true) ** 2 + (S_pred - S_true) ** 2).mean()
 
-# -----------------------------------------------------------------------------
-#  Helper blocks ----------------------------------------------------------------
-# -----------------------------------------------------------------------------
-class ResidualBlock1D(nn.Module):
-    """A simple 1‑D residual block: Conv → BN → LeakyReLU → Conv → BN + skip."""
-    def __init__(self, channels: int, dilation: int = 1):
-        super().__init__()
-        kernel_size = global_params["KERNEL_SIZE"]
-        alpha = global_params["LEAKY_RELU_ALPHA"]
-        
-        self.conv1 = nn.Conv1d(channels, channels, kernel_size=kernel_size, 
-                              padding=dilation, dilation=dilation)
-        self.bn1 = nn.BatchNorm1d(channels)
-        self.conv2 = nn.Conv1d(channels, channels, kernel_size=kernel_size, 
-                              padding=dilation, dilation=dilation)
-        self.bn2 = nn.BatchNorm1d(channels)
-        self.act = nn.LeakyReLU(alpha, inplace=True)
 
-    def forward(self, x):
-        residual = x
-        out = self.act(self.bn1(self.conv1(x)))
-        out = self.bn2(self.conv2(out))
-        return self.act(out + residual)
+def combined_spectral_loss(pred32, target32, input_x, lambda_consistency=None, lambda_phasor=None, harmonic=None):
+    """MSE + lambda_consistency * consistency + lambda_phasor * phasor distance.
 
-class ResidualBlock2D(nn.Module):
-    """A simple 2‑D residual block: Conv2d → BN → LeakyReLU → Conv2d → BN + skip."""
-    def __init__(self, channels: int, dilation: int = 1):
-        super().__init__()
-        kernel_size = global_params["KERNEL_SIZE"]
-        alpha = global_params["LEAKY_RELU_ALPHA"]
-        
-        self.conv1 = nn.Conv2d(channels, channels, kernel_size=kernel_size, 
-                              padding=dilation, dilation=dilation)
-        self.bn1 = nn.BatchNorm2d(channels)
-        self.conv2 = nn.Conv2d(channels, channels, kernel_size=kernel_size, 
-                              padding=dilation, dilation=dilation)
-        self.bn2 = nn.BatchNorm2d(channels)
-        self.act = nn.LeakyReLU(alpha, inplace=True)
+    The consistency term compares the prediction, averaged over each group of
+    GROUP_SIZE adjacent output channels, with the input channels averaged over
+    repeats.
 
-    def forward(self, x):
-        residual = x
-        out = self.act(self.bn1(self.conv1(x)))
-        out = self.bn2(self.conv2(out))
-        return self.act(out + residual)
-
-# -----------------------------------------------------------------------------
-#  Physics‑aware loss ----------------------------------------------------------
-# -----------------------------------------------------------------------------
-def combined_spectral_loss(pred32, target32, input16xR, lambda_consistency=None, lambda_phasor=None, harmonic=None):
-    """Combined reconstruction + consistency + phasor loss."""
+    pred32, target32: (B, 32)
+    input_x:          (B, 1, channel_num, R)
+    """
     if lambda_consistency is None:
         lambda_consistency = global_params["LAMBDA_CONSISTENCY"]
     if lambda_phasor is None:
         lambda_phasor = global_params["LAMBDA_PHASOR"]
     if harmonic is None:
         harmonic = global_params["DEFAULT_HARMONIC"]
-    
-    # MSE + consistency loss
-    mse32 = F.mse_loss(pred32, target32)
-    
-    # Consistency: channel groups in output should match input channels
-    group_size = global_params["GROUP_SIZE"]
-    channel_groups = pred32.view(pred32.size(0), channel_num, group_size).mean(dim=2)
-    
-    # Get mean of input channels across replicates
-    if input16xR.dim() == 4:
-        input16xR = input16xR.squeeze(1).permute(0, 2, 1)
-    input_mean = input16xR.mean(dim=1)
-    
-    consistency_loss = F.mse_loss(channel_groups, input_mean)
-    mse_loss = mse32 + lambda_consistency * consistency_loss
-        
-    phasor = phasor_loss(pred32, target32, harmonic=harmonic)
-    return mse_loss + lambda_phasor * phasor 
 
-class FilmEarlyNet(nn.Module):
+    channel_num = global_params["channel_num"]
+    group_size = global_params["GROUP_SIZE"]
+
+    mse32 = F.mse_loss(pred32, target32)
+
+    pred_groups = pred32.view(pred32.size(0), channel_num, group_size).mean(dim=2)  # (B, channel_num)
+    input_mean = input_x.squeeze(1).mean(dim=2)                                      # (B, channel_num)
+    consistency = F.mse_loss(pred_groups, input_mean)
+
+    phasor = phasor_loss(pred32, target32, harmonic=harmonic)
+    return mse32 + lambda_consistency * consistency + lambda_phasor * phasor
+
+
+# -----------------------------------------------------------------------------
+# Building blocks
+# -----------------------------------------------------------------------------
+class ResidualBlock1D(nn.Module):
+    """Conv1d → BN → LeakyReLU → Conv1d → BN, plus identity skip, then LeakyReLU."""
+    def __init__(self, channels: int, dilation: int = 1):
+        super().__init__()
+        kernel_size = global_params["KERNEL_SIZE"]
+        alpha = global_params["LEAKY_RELU_ALPHA"]
+        self.conv1 = nn.Conv1d(channels, channels, kernel_size=kernel_size, padding=dilation, dilation=dilation)
+        self.bn1 = nn.BatchNorm1d(channels)
+        self.conv2 = nn.Conv1d(channels, channels, kernel_size=kernel_size, padding=dilation, dilation=dilation)
+        self.bn2 = nn.BatchNorm1d(channels)
+        self.act = nn.LeakyReLU(alpha, inplace=True)
+
+    def forward(self, x):
+        out = self.act(self.bn1(self.conv1(x)))
+        out = self.bn2(self.conv2(out))
+        return self.act(out + x)
+
+
+class ResidualBlock2D(nn.Module):
+    """Conv2d → BN → LeakyReLU → Conv2d → BN, plus identity skip, then LeakyReLU."""
+    def __init__(self, channels: int, dilation: int = 1):
+        super().__init__()
+        kernel_size = global_params["KERNEL_SIZE"]
+        alpha = global_params["LEAKY_RELU_ALPHA"]
+        self.conv1 = nn.Conv2d(channels, channels, kernel_size=kernel_size, padding=dilation, dilation=dilation)
+        self.bn1 = nn.BatchNorm2d(channels)
+        self.conv2 = nn.Conv2d(channels, channels, kernel_size=kernel_size, padding=dilation, dilation=dilation)
+        self.bn2 = nn.BatchNorm2d(channels)
+        self.act = nn.LeakyReLU(alpha, inplace=True)
+
+    def forward(self, x):
+        out = self.act(self.bn1(self.conv1(x)))
+        out = self.bn2(self.conv2(out))
+        return self.act(out + x)
+
+
+# -----------------------------------------------------------------------------
+# Network
+# -----------------------------------------------------------------------------
+class PRESD(nn.Module):
+    """PRESD network: reconstructs a 32-channel emission spectrum for each pixel
+    from C_in reduced spectral channels acquired R times.
+
+    Shapes are per pixel (batch dimension omitted). With the default
+    configuration: C_in = channel_num, 221 = BASE_CHANNELS, 86 = DECODER_CHANNELS.
+
+    (a) Convolutional feature extraction
+        reduced spectral input                                   C_in x R
+        Conv2d 3x3 (pad 1) + BN + LeakyReLU                      221 x C_in x R
+        concat excitation wavelength λ_ex as an extra channel    222 x C_in x R
+    (b) Residual encoding & repeat integration
+        5 x ResidualBlock2D (two 3x3 convs each)                 222 x C_in x R
+        transition FC (linear R → 1)                             222 x C_in
+    (c) Wavelength-aware self-attention
+        ConvTranspose1d (C_in → 32, 222 → 86)                    86 x 32
+        append λ_ex and λ_em rows to each of the 32 tokens       88 x 32
+        multi-head self-attention (4 heads, embed 88) + residual,
+        then keep the 86 feature rows                            86 x 32
+    (d) Spectral reconstruction
+        BN + LeakyReLU + ResidualBlock1D (two 3-tap convs)       86 x 32
+        Conv1d 1x1 (project to 1)                                1 x 32
+        reconstructed emission spectrum                          32
     """
-    FilmEarlyNet with Feature-wise Linear Modulation (FiLM) and wavelength-aware attention.
-    
-    Key features:
-    - Takes both spectral data (x) and wavelength information (wave) as inputs
-    - Uses attention mechanism for wavelength-aware processing  
-    - Adds laser wavelength as an additional channel for conditioning
-    """
-    def __init__(self, base_channels=None, num_heads=None, replicate_count=None, **kwargs):
+    def __init__(self, base_channels=None, replicate_count=None):
         super().__init__()
         params = load_global_params()
-        
-        # replicate_count must be explicitly provided
-        if replicate_count is None:
-            raise ValueError("replicate_count must be explicitly provided to FilmEarlyNet constructor. "
-                           "This defines the number of input channels (number of position repeats).")
-        
-        print(f"FilmEarlyNet (Hybrid 2D with FC transition) initializing with replicate_count: {replicate_count}")
 
-        # Use global parameters with optional overrides
+        if replicate_count is None:
+            raise ValueError("replicate_count (number of repeats R) must be provided.")
         if base_channels is None:
             base_channels = params["BASE_CHANNELS"]
-        if num_heads is None:
-            num_heads = params["NUM_HEADS"]
 
-        # Entry conv - 2D version
-        kernel_size = params["KERNEL_SIZE"]
-        padding = params["PADDING"]
+        channel_num = params["channel_num"]
         alpha = params["LEAKY_RELU_ALPHA"]
-        
+        decoder_channels = params["DECODER_CHANNELS"]
+        self.output_channels = params["OUTPUT_CHANNELS"]
+        self.decoder_channels = decoder_channels
+
+        # (a) Convolutional feature extraction
         self.entry = nn.Sequential(
-            nn.Conv2d(1, base_channels, kernel_size=kernel_size, padding=padding),
+            nn.Conv2d(1, base_channels, kernel_size=params["KERNEL_SIZE"], padding=params["PADDING"]),
             nn.BatchNorm2d(base_channels),
             nn.LeakyReLU(alpha, inplace=True),
         )
 
-        # Residual blocks - 2D version for base_channels + 1 laser channel
-        num_blocks = params.get('NUM_BLOCKS', params["NUM_BLOCKS"])
+        # (b) Residual encoding & repeat integration
         self.blocks = nn.ModuleList([
             ResidualBlock2D(base_channels + 1, dilation=1)
-            for _ in range(num_blocks)
+            for _ in range(params["NUM_BLOCKS"])
         ])
-
-        # Transition FC layer: reduces R dimension (B, 65, channel_num, R) → (B, 65, channel_num, 1)
         self.transition_fc = nn.Linear(replicate_count, 1)
 
-        # Simplified upsampling configuration
-        channel_num = params['channel_num']
-        upsampling_factor = params["OUTPUT_CHANNELS"] // channel_num
-        upsample_configs = {
-            2: (4, 1), 4: (8, 2), 8: (16, 4)
-        }
-        kernel_size, padding = upsample_configs.get(upsampling_factor, (upsampling_factor * 2, upsampling_factor // 2))
-        
-        decoder_channels = params["DECODER_CHANNELS"]
-        self.up = nn.ConvTranspose1d(base_channels + 1, decoder_channels, 
-                                    kernel_size=kernel_size, stride=upsampling_factor, padding=padding)
-        
-        # Decoder
-        final_kernel_size = params["FINAL_KERNEL_SIZE"]
+        # (c) Wavelength-aware self-attention
+        # Transposed conv: C_in → 32 along the spectral axis, 222 → 86 features.
+        # (kernel_size, padding) are chosen so the output length is exactly 32.
+        upsampling_factor = self.output_channels // channel_num
+        upsample_configs = {2: (4, 1), 4: (8, 2), 8: (16, 4)}
+        kernel_size, padding = upsample_configs.get(
+            upsampling_factor, (upsampling_factor * 2, upsampling_factor // 2))
+        self.up = nn.ConvTranspose1d(base_channels + 1, decoder_channels,
+                                     kernel_size=kernel_size, stride=upsampling_factor, padding=padding)
+        # Token features: 86 learned features + λ_ex + λ_em = 88.
+        self.final_attn = nn.MultiheadAttention(embed_dim=decoder_channels + 2,
+                                                num_heads=params["FINAL_ATTN_HEADS"])
+
+        # (d) Spectral reconstruction
         self.decoder = nn.Sequential(
             nn.BatchNorm1d(decoder_channels),
             nn.LeakyReLU(alpha, inplace=True),
             ResidualBlock1D(decoder_channels, dilation=1),
-            nn.Conv1d(decoder_channels, 1, kernel_size=final_kernel_size),
+            nn.Conv1d(decoder_channels, 1, kernel_size=params["FINAL_KERNEL_SIZE"]),
         )
-        
-        # Final attention layer
-        # Input to attention is z (decoder_channels) + wavelength_matrix (2) = decoder_channels + 2
-        attn_embed_dim = decoder_channels + 2
-        final_attn_heads = params["FINAL_ATTN_HEADS"]
-        self.final_attn = nn.MultiheadAttention(embed_dim=attn_embed_dim, num_heads=final_attn_heads)
-        
-        # Store parameters needed in forward pass as instance variables
-        # (to avoid mismatch when global_params is updated between trials)
-        self.decoder_channels = decoder_channels
-        self.output_channels = params["OUTPUT_CHANNELS"]
 
-        print(f"FilmEarlyNet (Hybrid 2D→1D with FC transition) initialized • replicates={replicate_count} • channels={channel_num} • attention_heads={num_heads}")
+        print(f"PRESD initialized • repeats={replicate_count} • channels={channel_num}")
 
     def forward(self, x, wave=None):
         """
-        Forward pass with wavelength conditioning and attention (Hybrid 2D/1D with FC transition).
-        
         Args:
-            x: Input spectral data (B, 1, channel_num, R) or (B, R, channel_num)
-            wave: Wavelength information (B,) - normalized wavelength values
-        
+            x:    (B, 1, C_in, R) or (B, R, C_in), normalized reduced spectral input
+            wave: (B,) excitation wavelength λ_ex in nm, or None to skip wavelength conditioning
         Returns:
-            Output spectrum (B, 32)
+            (B, 32) reconstructed spectrum (same normalization as the training targets)
         """
-        # Ensure input is 4D for 2D processing: (B, 1, channel_num, R)
         if x.dim() == 3:
-            # (B, R, channel_num) → (B, 1, channel_num, R)
-            x = x.permute(0, 2, 1).unsqueeze(1)
-        elif x.dim() == 4 and x.size(1) != 1:
-            # Ensure channel is first
-            x = x.permute(0, 1, 3, 2) if x.size(1) > 1 else x
-            
-        z = self.entry(x)  # (B, 64, channel_num, R)
+            x = x.permute(0, 2, 1).unsqueeze(1)                     # (B, 1, C_in, R)
 
-        # Add laser wavelength channel as 2D feature map
+        # (a) Convolutional feature extraction
+        z = self.entry(x)                                            # (B, 221, C_in, R)
         if wave is not None:
-            laser_param = wave.float().unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).to(z.device)
-            B, C, H, W = z.shape
-            laser_channel = laser_param.expand(B, 1, H, W)
-            z = torch.cat([z, laser_channel], dim=1)  # (B, 65, channel_num, R)
+            B, _, H, W = z.shape
+            ex_channel = wave.float().view(B, 1, 1, 1).to(z.device).expand(B, 1, H, W)
+            z = torch.cat([z, ex_channel], dim=1)                    # (B, 222, C_in, R)
 
-        # Apply 2D residual blocks
+        # (b) Residual encoding & repeat integration
         for blk in self.blocks:
-            z = blk(z)  # (B, 65, channel_num, R)
+            z = blk(z)                                               # (B, 222, C_in, R)
+        z = self.transition_fc(z).squeeze(-1)                        # (B, 222, C_in)
 
-        # Transition from 2D to 1D: use FC layer to reduce R dimension
-        # (B, 65, channel_num, R) → (B, 65, channel_num, 1) → (B, 65, channel_num)
-        z = self.transition_fc(z).squeeze(-1)  # (B, 65, channel_num)
-
-        z = self.up(z)  # (B, 64, 32)
-        
-        # Create wavelength matrix for attention
+        # (c) Wavelength-aware self-attention
+        z = self.up(z)                                               # (B, 86, 32)
         if wave is not None:
             B = z.size(0)
-            laser_wavelengths = wave.float().unsqueeze(-1).repeat(1, self.output_channels).to(z.device)
-            chan_wavelengths = (CHAN_NM.to(z.device) / 1.0).unsqueeze(0).repeat(B, 1)
-            wavelength_matrix = torch.stack([laser_wavelengths, chan_wavelengths], dim=1)
-            
-            # Apply attention
-            z_with_wavelengths = torch.cat([z, wavelength_matrix], dim=1)
-            seq_32, _ = self.final_attn(z_with_wavelengths.permute(2,0,1), z_with_wavelengths.permute(2,0,1), z_with_wavelengths.permute(2,0,1))
-            seq_32 = seq_32.permute(1,2,0)
-            
-            z_attended = z_with_wavelengths + seq_32
-            z_final = z_attended[:, :self.decoder_channels, :]  # Extract feature channels
-        else:
-            z_final = z
-        
-        return self.decoder(z_final).squeeze(1) 
+            lambda_ex = wave.float().unsqueeze(-1).repeat(1, self.output_channels).to(z.device)  # (B, 32)
+            lambda_em = CHAN_NM.to(z.device).unsqueeze(0).repeat(B, 1)                            # (B, 32)
+            tokens = torch.cat([z, torch.stack([lambda_ex, lambda_em], dim=1)], dim=1)            # (B, 88, 32)
+            seq = tokens.permute(2, 0, 1)                            # (32, B, 88): 32 spectral tokens
+            attn_out, _ = self.final_attn(seq, seq, seq)
+            z = (tokens + attn_out.permute(1, 2, 0))[:, :self.decoder_channels, :]  # (B, 86, 32)
+
+        # (d) Spectral reconstruction
+        return self.decoder(z).squeeze(1)                            # (B, 32)

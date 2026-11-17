@@ -4,3 +4,7 @@ __pycache__/
 .DS_Store
 cache/
 *.log
+
+# Outputs created by train.py / test.py (not part of the repository)
+results/
+users_models/
