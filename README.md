@@ -1,12 +1,12 @@
-# PRESD
+# PRESD: Pixel-wise Resolution Expansion of Spectra via Deep Learning
 
-A deep learning pipeline for **spectral super-resolution** of fluorescence microscopy images. Given a reduced (4, 8, or 16 spectral channels) acquisition, the model reconstructs the full **32-channel** emission spectrum per pixel.
+A deep learning pipeline for **pixel-wise resolution expansion of spectra** in fluorescence microscopy images. Given a reduced (4, 8, or 16 spectral channels) acquisition, the model reconstructs the full **32-channel** emission spectrum per pixel.
 
 ---
 
 ## Overview
 
-Fluorescence spectral microscopy typically requires many spectral channels to resolve overlapping fluorophore signatures. This project trains a neural network (a wavelength-conditioned convolutional network with attention) to upscale low-channel spectral images to 32 channels, enabling faster acquisitions without sacrificing spectral resolution.
+Fluorescence spectral microscopy typically requires many spectral channels to resolve overlapping fluorophore signatures. This project trains a neural network (a wavelength-conditioned convolutional network with attention) to expand low-channel spectral images to 32 channels, enabling faster acquisitions without sacrificing spectral resolution.
 
 **Key features:**
 - `prepare_data.py` builds the reduced input (4, 8 or 16 channels, any choice of repeats) and the 32-channel ground truth from the raw `.lsm` data
